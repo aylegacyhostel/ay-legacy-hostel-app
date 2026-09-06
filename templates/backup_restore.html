@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Backup & Restore</h1>
+    <p class="muted">Administrator-only protection for hostel records.</p>
+  </div>
+</div>
+
+<div class="card-grid">
+  <section class="card">
+    <h2>Download Backup</h2>
+    <p>Creates a JSON backup of the current hostel business records. Keep the downloaded file somewhere safe, such as your computer and a secure cloud drive.</p>
+    <div class="stats-mini">
+      <div><strong>{{ counts.students }}</strong><span>Students</span></div>
+      <div><strong>{{ counts.rooms }}</strong><span>Rooms</span></div>
+      <div><strong>{{ counts.payments }}</strong><span>Payments</span></div>
+      <div><strong>{{ counts.enquiries }}</strong><span>Enquiries</span></div>
+    </div>
+    <p><a class="button-link" href="{{ url_for('download_backup') }}">Download Backup Now</a></p>
+    <p class="muted"><small>Student photo files stay in Supabase Storage; the backup preserves the photo references in each student record.</small></p>
+  </section>
+
+  <section class="card">
+    <h2>Restore Backup</h2>
+    <p><strong>Warning:</strong> restoring replaces the current students, rooms, payments, and enquiries with the contents of the selected backup file.</p>
+    <p>Staff accounts and the audit log are preserved, so your current administrator login will not be overwritten.</p>
+    <form method="post" action="{{ url_for('restore_backup') }}" enctype="multipart/form-data">
+      <label>Backup file</label>
+      <input type="file" name="backup_file" accept="application/json,.json" required>
+
+      <label style="margin-top:14px;display:block;">Confirmation</label>
+      <input type="text" name="confirm_restore" placeholder="Type RESTORE" autocomplete="off" required>
+      <p class="muted"><small>Type <strong>RESTORE</strong> exactly to confirm.</small></p>
+
+      <button type="submit" class="danger-button" onclick="return confirm('Restore this backup? Current student, room, payment and enquiry records will be replaced.');">Restore Backup</button>
+    </form>
+  </section>
+</div>
+{% endblock %}
