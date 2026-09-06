@@ -45,8 +45,7 @@ def _request(method, path, data=None, content_type=None, allow_404=False):
     req = Request(base_url + path, data=data, headers=headers, method=method)
     try:
         with urlopen(req, timeout=30) as resp:
-            payload = resp.read()
-            return resp.status, payload
+            return resp.status, resp.read()
     except HTTPError as exc:
         body = exc.read().decode('utf-8', errors='replace')
         if allow_404 and exc.code == 404:
@@ -126,7 +125,6 @@ def signed_photo_url(photo_value, expires_in=3600):
 
 def install_photo_storage(app_module):
     app = app_module.app
-    original_save = app_module.save_student_form
 
     def persistent_save_student_form(conn, sid=None):
         fields = [
@@ -145,9 +143,7 @@ def install_photo_storage(app_module):
                     photo = upload_photo(upload)
                 except (ValueError, RuntimeError) as exc:
                     app_module.flash(str(exc), 'danger')
-                    raise
             else:
-                # Local-development fallback. Render users should configure Supabase Storage.
                 if app_module.allowed_file(upload.filename):
                     local_name = (
                         f"{datetime.now().strftime('%Y%m%d%H%M%S')}_"
@@ -156,7 +152,7 @@ def install_photo_storage(app_module):
                     upload.save(app_module.UPLOADS / local_name)
                     photo = local_name
                     app_module.flash(
-                        'Photo storage is not configured. This image was saved only on the local server.',
+                        'Supabase photo storage is not configured. This photo is only temporary and may disappear after a redeploy.',
                         'warning'
                     )
 
@@ -196,7 +192,6 @@ def install_photo_storage(app_module):
             except RuntimeError:
                 abort(502)
 
-        # Legacy/local photo fallback for older records.
         return send_from_directory(app_module.UPLOADS, photo)
 
     app.add_url_rule(
