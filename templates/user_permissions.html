@@ -1,0 +1,10 @@
+{% extends 'base.html' %}{% block content %}
+<h1>Permissions: {{ staff.full_name or staff.username }}</h1>
+<p>Only an administrator can change these settings. Total hostel income and staff management are never available to staff.</p>
+<form class="form-card" method="post">
+{% for p in permissions %}
+<label style="display:block;margin:10px 0"><input type="checkbox" name="permissions" value="{{p}}" {% if p in granted %}checked{% endif %}> {{p.replace('.', ' / ').replace('_',' ').title()}}</label>
+{% endfor %}
+<button type="submit">Save Permissions</button>
+<a href="{{ url_for('users') }}">Cancel</a>
+</form>{% endblock %}
