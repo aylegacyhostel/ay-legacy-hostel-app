@@ -91,6 +91,13 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, action TEXT NOT NULL, entity_type TEXT NOT NULL,
             entity_id INTEGER, details TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
         """)
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS staff_permissions (
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        permission TEXT NOT NULL,
+        PRIMARY KEY (user_id, permission)
+    );
+    """)
     add_column(conn, 'users', 'full_name TEXT')
     add_column(conn, 'users', 'active INTEGER DEFAULT 1')
     add_column(conn, 'students', 'photo TEXT')
@@ -130,6 +137,47 @@ def admin_required(fn):
         if session.get('role')!='admin': abort(403)
         return fn(*a,**k)
     return w
+
+
+PERMISSIONS = ["students.view","students.create","students.edit","rooms.view","payments.view","payments.create","payments.edit","receipts.view","arrears.view","enquiries.view","enquiries.edit","reports.students","reports.arrears"]
+DEFAULT_STAFF_PERMISSIONS = ('students.view','students.create','students.edit','rooms.view','payments.view','payments.create','receipts.view','arrears.view','enquiries.view','enquiries.edit')
+
+def has_permission(permission):
+    if session.get('role') == 'admin':
+        return True
+    if permission not in PERMISSIONS or not session.get('user'):
+        return False
+    conn = db()
+    row = conn.execute('SELECT id,active,role FROM users WHERE username=?',(session['user'],)).fetchone()
+    granted = bool(row and row['active'] and row['role'] == 'staff' and conn.execute(
+        'SELECT 1 FROM staff_permissions WHERE user_id=? AND permission=?',(row['id'],permission)).fetchone())
+    conn.close()
+    return granted
+
+def permission_required(permission):
+    def decorate(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not has_permission(permission):
+                abort(403)
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorate
+
+@app.before_request
+def validate_logged_in_user():
+    if 'user' not in session:
+        return
+    conn = db()
+    user = conn.execute('SELECT role,active FROM users WHERE username=?',(session['user'],)).fetchone()
+    conn.close()
+    if not user or not user['active'] or user['role'] != session.get('role'):
+        session.clear()
+        return redirect(url_for('login'))
+
+@app.context_processor
+def inject_permissions():
+    return {'can': has_permission}
 
 def allowed_file(name): return '.' in name and name.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -185,16 +233,19 @@ def audit_logs():
 def dashboard():
     conn=db()
     stats=conn.execute("SELECT COUNT(*) total, SUM(CASE WHEN status='Active' THEN 1 ELSE 0 END) active FROM students").fetchone()
-    money=conn.execute('SELECT COALESCE(SUM(amount_due),0) due,COALESCE(SUM(amount_paid),0) paid FROM payments').fetchone()
+    money=conn.execute('SELECT COALESCE(SUM(amount_due),0) due,COALESCE(SUM(amount_paid),0) paid FROM payments').fetchone() if session.get('role')=='admin' else None
     beds=conn.execute("SELECT COALESCE(SUM(capacity),0) total FROM rooms WHERE status!='Maintenance'").fetchone()['total']
     occupied=conn.execute("SELECT COUNT(*) c FROM students WHERE status='Active' AND room_number IS NOT NULL AND room_number<>''").fetchone()['c']
     balances=conn.execute('''SELECT s.id,s.first_name||' '||s.last_name student_name,s.room_number,COALESCE(SUM(p.amount_due),0) due,COALESCE(SUM(p.amount_paid),0) paid,COALESCE(SUM(p.amount_due-p.amount_paid),0) balance FROM students s LEFT JOIN payments p ON p.student_id=s.id GROUP BY s.id HAVING COALESCE(SUM(p.amount_due-p.amount_paid),0)>0 ORDER BY balance DESC LIMIT 10''').fetchall()
     recent=conn.execute("SELECT p.*,s.first_name||' '||s.last_name student_name FROM payments p JOIN students s ON s.id=p.student_id ORDER BY COALESCE(NULLIF(p.payment_date,''),CAST(p.created_at AS TEXT)) DESC LIMIT 8").fetchall()
+    if not has_permission('arrears.view'): balances=[]
+    if not has_permission('payments.view'): recent=[]
     new_enquiries=conn.execute("SELECT COUNT(*) c FROM enquiries WHERE status='New'").fetchone()['c']; conn.close()
-    return render_template('dashboard.html',total_students=stats['active'] or 0,total_due=money['due'],total_paid=money['paid'],outstanding=money['due']-money['paid'],beds=beds,occupied=occupied,new_enquiries=new_enquiries,balances=balances,recent=recent)
+    return render_template('dashboard.html',total_students=stats['active'] or 0,total_due=money['due'] if money else None,total_paid=money['paid'] if money else None,outstanding=money['due']-money['paid'] if money else None,beds=beds,occupied=occupied,new_enquiries=new_enquiries,balances=balances,recent=recent)
 
 @app.route('/students')
 @login_required
+@permission_required('students.view')
 def students():
     q=request.args.get('q','').strip(); year=request.args.get('year','').strip(); status=request.args.get('status','').strip(); room=request.args.get('room','').strip(); program=request.args.get('program','').strip()
     sql="""SELECT s.*,COALESCE(SUM(p.amount_due),0) total_due,COALESCE(SUM(p.amount_paid),0) total_paid,COALESCE(SUM(p.amount_due-p.amount_paid),0) balance FROM students s LEFT JOIN payments p ON p.student_id=s.id WHERE 1=1"""; params=[]
@@ -225,6 +276,7 @@ def save_student_form(conn,sid=None):
 
 @app.route('/students/new',methods=['GET','POST'])
 @login_required
+@permission_required('students.create')
 def new_student():
     conn=db(); rooms=conn.execute('SELECT * FROM rooms ORDER BY room_number').fetchall()
     if request.method=='POST':
@@ -234,6 +286,7 @@ def new_student():
 
 @app.route('/students/<int:sid>/edit',methods=['GET','POST'])
 @login_required
+@permission_required('students.edit')
 def edit_student(sid):
     conn=db(); student=conn.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone(); rooms=conn.execute('SELECT * FROM rooms ORDER BY room_number').fetchall()
     if not student: conn.close(); abort(404)
@@ -244,6 +297,7 @@ def edit_student(sid):
 
 @app.route('/students/<int:sid>')
 @login_required
+@permission_required('students.view')
 def student_detail(sid):
     conn=db(); s=conn.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone();
     if not s: conn.close(); abort(404)
@@ -252,6 +306,7 @@ def student_detail(sid):
 
 @app.route('/students/<int:sid>/payment/new',methods=['GET','POST'])
 @login_required
+@permission_required('payments.create')
 def new_payment(sid):
     conn=db(); s=conn.execute('SELECT * FROM students WHERE id=?',(sid,)).fetchone();
     if not s: conn.close(); abort(404)
@@ -263,6 +318,7 @@ def new_payment(sid):
 
 @app.route('/payments/<int:pid>/edit',methods=['GET','POST'])
 @login_required
+@permission_required('payments.edit')
 def edit_payment(pid):
     conn=db(); p=conn.execute('SELECT * FROM payments WHERE id=?',(pid,)).fetchone();
     if not p: conn.close(); abort(404)
@@ -273,11 +329,13 @@ def edit_payment(pid):
 
 @app.route('/payments')
 @login_required
+@permission_required('payments.view')
 def payments():
     conn=db(); rows=conn.execute("SELECT p.*,s.first_name||' '||s.last_name student_name,s.room_number FROM payments p JOIN students s ON s.id=p.student_id ORDER BY p.payment_date DESC,p.id DESC").fetchall(); conn.close(); return render_template('payments.html',payments=rows)
 
 @app.route('/receipt/<int:pid>')
 @login_required
+@permission_required('receipts.view')
 def receipt(pid):
     conn=db(); row=conn.execute("SELECT p.*,s.first_name||' '||s.last_name student_name,s.student_id student_code,s.room_number FROM payments p JOIN students s ON s.id=p.student_id WHERE p.id=?",(pid,)).fetchone(); totals=student_totals(conn,row['student_id']) if row else None; conn.close()
     if not row: abort(404)
@@ -285,6 +343,7 @@ def receipt(pid):
 
 @app.route('/receipt/<int:pid>/pdf')
 @login_required
+@permission_required('receipts.view')
 def receipt_pdf(pid):
     conn=db(); p=conn.execute("SELECT p.*,s.first_name||' '||s.last_name student_name,s.student_id student_code,s.room_number FROM payments p JOIN students s ON s.id=p.student_id WHERE p.id=?",(pid,)).fetchone(); totals=student_totals(conn,p['student_id']) if p else None; conn.close()
     if not p: abort(404)
@@ -296,11 +355,13 @@ def receipt_pdf(pid):
 
 @app.route('/arrears')
 @login_required
+@permission_required('arrears.view')
 def arrears():
     conn=db(); rows=conn.execute('''SELECT s.id,s.first_name||' '||s.last_name student_name,s.phone,s.parent_phone,s.room_number,s.program,s.year_level,COALESCE(SUM(p.amount_due),0) due,COALESCE(SUM(p.amount_paid),0) paid,COALESCE(SUM(p.amount_due-p.amount_paid),0) balance FROM students s LEFT JOIN payments p ON p.student_id=s.id GROUP BY s.id HAVING COALESCE(SUM(p.amount_due-p.amount_paid),0)>0 ORDER BY balance DESC''').fetchall(); conn.close(); return render_template('arrears.html',rows=rows)
 
 @app.route('/rooms')
 @login_required
+@permission_required('rooms.view')
 def rooms():
     conn=db(); rows=conn.execute('''SELECT r.*,COUNT(s.id) occupied FROM rooms r LEFT JOIN students s ON s.room_number=r.room_number AND s.status='Active' GROUP BY r.id ORDER BY r.room_number''').fetchall(); conn.close(); return render_template('rooms.html',rooms=rows)
 
@@ -337,12 +398,52 @@ def users():
 @admin_required
 def new_user():
     if request.method=='POST':
+        username=request.form.get('username','').strip()
+        password=request.form.get('password','')
+        if not username or len(password)<8:
+            flash('Username and a password of at least 8 characters are required.','danger')
+            return render_template('user_form.html',permissions=PERMISSIONS)
         conn=db()
         try:
-            conn.execute('INSERT INTO users(username,password,role,full_name,active) VALUES(?,?,?,?,1)',(request.form.get('username','').strip(),generate_password_hash(request.form.get('password','')),request.form.get('role','staff'),request.form.get('full_name','').strip())); audit(conn,'create','user',details=request.form.get('username','')); conn.commit(); flash('Staff account created.','success'); return redirect(url_for('users'))
-        except integrity_error_types(): flash('Username already exists.','danger')
-        finally: conn.close()
-    return render_template('user_form.html')
+            conn.execute('INSERT INTO users(username,password,role,full_name,active) VALUES(?,?,?,?,1)',
+                         (username,generate_password_hash(password),'staff',request.form.get('full_name','').strip()))
+            uid=conn.execute('SELECT id FROM users WHERE username=?',(username,)).fetchone()['id']
+            selected=set(request.form.getlist('permissions')) & set(PERMISSIONS)
+            for p in selected:
+                conn.execute('INSERT INTO staff_permissions(user_id,permission) VALUES(?,?)',(uid,p))
+            audit(conn,'create_staff','user',uid,','.join(sorted(selected)))
+            conn.commit()
+            flash('Staff account created.','success')
+            return redirect(url_for('users'))
+        except integrity_error_types():
+            conn.rollback()
+            flash('Username already exists.','danger')
+        finally:
+            conn.close()
+    return render_template('user_form.html',permissions=PERMISSIONS,defaults=DEFAULT_STAFF_PERMISSIONS)
+
+@app.route('/users/<int:uid>/permissions',methods=['GET','POST'])
+@login_required
+@admin_required
+def edit_user_permissions(uid):
+    conn=db()
+    u=conn.execute('SELECT id,username,full_name,role FROM users WHERE id=?',(uid,)).fetchone()
+    if not u or u['role']!='staff':
+        conn.close()
+        abort(404)
+    if request.method=='POST':
+        selected=set(request.form.getlist('permissions')) & set(PERMISSIONS)
+        conn.execute('DELETE FROM staff_permissions WHERE user_id=?',(uid,))
+        for p in selected:
+            conn.execute('INSERT INTO staff_permissions(user_id,permission) VALUES(?,?)',(uid,p))
+        audit(conn,'change_permissions','user',uid,','.join(sorted(selected)))
+        conn.commit()
+        conn.close()
+        flash('Permissions updated.','success')
+        return redirect(url_for('users'))
+    granted={r['permission'] for r in conn.execute('SELECT permission FROM staff_permissions WHERE user_id=?',(uid,)).fetchall()}
+    conn.close()
+    return render_template('user_permissions.html',staff=u,permissions=PERMISSIONS,granted=granted)
 
 @app.route('/users/<int:uid>/toggle')
 @login_required
@@ -353,11 +454,13 @@ def toggle_user(uid):
 
 @app.route('/enquiries')
 @login_required
+@permission_required('enquiries.view')
 def enquiries():
     conn=db(); rows=conn.execute('SELECT * FROM enquiries ORDER BY created_at DESC').fetchall(); conn.close(); return render_template('enquiries.html',enquiries=rows)
 
 @app.route('/enquiries/<int:eid>/status',methods=['POST'])
 @login_required
+@permission_required('enquiries.edit')
 def enquiry_status(eid):
     conn=db(); conn.execute('UPDATE enquiries SET status=? WHERE id=?',(request.form.get('status','New'),eid)); audit(conn,'update_status','enquiry',eid,request.form.get('status','New')); conn.commit(); conn.close(); return redirect(url_for('enquiries'))
 
@@ -369,6 +472,7 @@ def apply():
 
 @app.route('/reports/students.xlsx')
 @login_required
+@permission_required('reports.students')
 def students_xlsx():
     conn=db(); rows=conn.execute("SELECT student_id,first_name,last_name,gender,phone,email,school,program,year_level,room_number,bed_space,status,parent_name,parent_phone,emergency_name,emergency_phone FROM students ORDER BY last_name,first_name").fetchall(); conn.close()
     wb=Workbook(); ws=wb.active; ws.title='Students'; headers=list(rows[0].keys()) if rows else ['student_id','first_name','last_name','gender','phone','email','school','program','year_level','room_number','bed_space','status','parent_name','parent_phone','emergency_name','emergency_phone']; ws.append(headers)
@@ -378,6 +482,7 @@ def students_xlsx():
 
 @app.route('/reports/arrears.xlsx')
 @login_required
+@permission_required('reports.arrears')
 def arrears_xlsx():
     conn=db(); rows=conn.execute('''SELECT s.student_id,s.first_name||' '||s.last_name student,s.phone,s.parent_phone,s.room_number,s.program,s.year_level,COALESCE(SUM(p.amount_due),0) due,COALESCE(SUM(p.amount_paid),0) paid,COALESCE(SUM(p.amount_due-p.amount_paid),0) balance FROM students s LEFT JOIN payments p ON p.student_id=s.id GROUP BY s.id HAVING COALESCE(SUM(p.amount_due-p.amount_paid),0)>0 ORDER BY balance DESC''').fetchall(); conn.close()
     wb=Workbook(); ws=wb.active; ws.title='Arrears'; headers=['student_id','student','phone','parent_phone','room_number','program','year_level','due','paid','balance']; ws.append(headers)
