@@ -1,0 +1,10 @@
+{% extends 'base.html' %}{% block content %}
+<h1>Download Backup</h1>
+<div class="panel">
+<p>Download a ZIP archive of hostel data (students, rooms, payments, enquiries, staff accounts, staff permissions and audit logs).</p>
+<p><strong>Admin only.</strong> The archive includes sensitive personal data and password hashes. Keep it in a secure location and do not share it.</p>
+<form method="post" action="{{ url_for('download_backup') }}">
+<button type="submit">Download Backup ZIP</button>
+</form>
+<p><small>This export does not include uploaded image files and cannot be automatically restored. It does not change or delete any records.</small></p>
+</div>{% endblock %}
