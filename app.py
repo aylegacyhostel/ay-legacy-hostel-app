@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, abort
-import sqlite3, os, io
+import sqlite3, os, io, csv, zipfile
 from pathlib import Path
 from functools import wraps
 from datetime import datetime
@@ -489,6 +489,58 @@ def arrears_xlsx():
     for r in rows: ws.append([r[h] for h in headers])
     for c in ws[1]: c.font=c.font.copy(bold=True)
     bio=io.BytesIO(); wb.save(bio); bio.seek(0); return send_file(bio,as_attachment=True,download_name='AY_Legacy_Hostel_Arrears.xlsx',mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@app.route('/admin/backup')
+@login_required
+@admin_required
+def backup_page():
+    return render_template('backup.html')
+
+
+@app.route('/admin/backup/download', methods=['POST'])
+@login_required
+@admin_required
+def download_backup():
+    # Backups contain private student and staff information; never expose to staff.
+    tables = ('users', 'staff_permissions', 'students', 'rooms', 'payments', 'enquiries', 'audit_logs')
+    conn = db()
+    output = io.BytesIO()
+    try:
+        with zipfile.ZipFile(output, mode='w', compression=zipfile.ZIP_DEFLATED) as archive:
+            for table in tables:
+                # Fixed allowlist of table names, not user-supplied SQL identifiers.
+                if IS_POSTGRES:
+                    exists = conn.execute(
+                        "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=?",
+                        (table,)).fetchone()
+                else:
+                    exists = conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+                if not exists:
+                    continue
+                cur = conn.execute('SELECT * FROM ' + table)
+                columns = [d[0] for d in cur.description]
+                csv_buffer = io.StringIO(newline='')
+                writer = csv.writer(csv_buffer)
+                writer.writerow(columns)
+                for row in cur.fetchall():
+                    writer.writerow([row[col] for col in columns])
+                archive.writestr(table + '.csv', csv_buffer.getvalue().encode('utf-8-sig'))
+            archive.writestr('README.txt',
+                'AY Legacy Hostel admin data export. Contains sensitive personal information and password hashes. '
+                'Store securely. CSV files are for backup/reference; this is not an automated database restore.\\n')
+        audit(conn, 'download_backup', 'backup', details='Admin downloaded CSV archive')
+        conn.commit()
+    finally:
+        conn.close()
+    output.seek(0)
+    response = send_file(output, as_attachment=True,
+        download_name='AY_Legacy_Hostel_Backup_' + datetime.now().strftime('%Y%m%d_%H%M%S') + '.zip',
+        mimetype='application/zip')
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
 
 init_db()
 
