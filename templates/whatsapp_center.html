@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block content %}
+<h1>WhatsApp Messaging Center</h1>
+<p>Only Admin and staff explicitly granted <strong>WhatsApp Send</strong> can access this page. Messages use the official Meta Cloud API.</p>
+{% if not ready %}<div class="flash danger"><strong>Not connected:</strong> Set WA_ACCESS_TOKEN, WA_PHONE_NUMBER_ID and WA_GRAPH_VERSION in Render. Sending is disabled until configured.</div>{% endif %}
+<h2>Send approved template</h2>
+<p>Business-initiated messages must use a template approved in WhatsApp Manager. This form supports templates without variables.</p>
+<form method="post" action="{{ url_for('whatsapp_send') }}">
+<input type="hidden" name="_csrf" value="{{ csrf }}">
+<label>Recipients <select name="scope" id="scope"><option value="all">All active students who opted in</option><option value="individual">One active student</option></select></label>
+<label>Student (for individual send) <select name="student_id"><option value="0">Choose student</option>{% for s in students %}<option value="{{ s.id }}">{{ s.first_name }} {{ s.last_name }} — {{ s.room_number or 'No room' }}{% if s.consent %} (opted in){% endif %}</option>{% endfor %}</select></label>
+<label>Approved template name <input name="template_name" required placeholder="hostel_inspection_notice" pattern="[a-z0-9_]+"></label>
+<label>Language code <input name="language" value="en_US" required></label>
+<label>Type SEND to confirm <input name="confirm" required autocomplete="off" placeholder="SEND"></label>
+<button type="submit" {% if not ready %}disabled{% endif %}>Send WhatsApp Template</button>
+</form>
+<h2>Active students and consent</h2>
+<p>Consent must be obtained from each student before marking them opted in. This is not inferred from hostel registration.</p>
+<table><thead><tr><th>Name</th><th>Room</th><th>Phone</th><th>WhatsApp consent</th>{% if is_admin %}<th>Admin action</th>{% endif %}</tr></thead><tbody>
+{% for s in students %}<tr><td>{{ s.first_name }} {{ s.last_name }}</td><td>{{ s.room_number or '-' }}</td><td>{{ s.phone or '-' }}</td><td>{{ 'Yes' if s.consent else 'No' }}</td>
+{% if is_admin %}<td><form method="post" action="{{ url_for('whatsapp_consent',sid=s.id) }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="consent" value="{{ 0 if s.consent else 1 }}"><button type="submit">{{ 'Revoke' if s.consent else 'Record opt-in' }}</button></form></td>{% endif %}</tr>{% endfor %}
+</tbody></table>
+<h2>Recent campaigns</h2>
+<table><thead><tr><th>ID</th><th>Sender</th><th>Recipients</th><th>Template</th><th>Created</th></tr></thead><tbody>
+{% for h in history %}<tr><td>{{ h.id }}</td><td>{{ h.sender }}</td><td>{{ h.scope }}</td><td>{{ h.template_name }}</td><td>{{ h.created_at }}</td></tr>{% endfor %}
+</tbody></table>
+{% endblock %}
