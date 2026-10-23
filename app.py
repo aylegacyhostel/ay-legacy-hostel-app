@@ -139,7 +139,7 @@ def admin_required(fn):
     return w
 
 
-PERMISSIONS = ["students.view","students.create","students.edit","rooms.view","payments.view","payments.create","payments.edit","receipts.view","arrears.view","enquiries.view","enquiries.edit","reports.students","reports.arrears"]
+PERMISSIONS = ["students.view","students.create","students.edit","rooms.view","payments.view","payments.create","payments.edit","receipts.view","arrears.view","enquiries.view","enquiries.edit","reports.students","reports.arrears","whatsapp.send"]
 DEFAULT_STAFF_PERMISSIONS = ('students.view','students.create','students.edit','rooms.view','payments.view','payments.create','receipts.view','arrears.view','enquiries.view','enquiries.edit')
 
 def has_permission(permission):
@@ -492,6 +492,9 @@ def arrears_xlsx():
 
 
 init_db()
+
+from whatsapp_messaging import install_whatsapp
+install_whatsapp(__import__(__name__))
 
 if __name__=='__main__':
     app.run(debug=True,host='0.0.0.0',port=int(os.environ.get('PORT','5000')))
