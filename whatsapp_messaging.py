@@ -1,7 +1,7 @@
 """Admin-controlled WhatsApp template messaging via Meta Cloud API."""
 import os, re, json, hmac, hashlib, secrets, urllib.request, urllib.error
 from flask import request, render_template, redirect, url_for, flash, session, abort, jsonify
-from database import db
+from database import db, IS_POSTGRES
 
 def normalize_ghana(value):
     digits = re.sub(r'\D', '', value or '')
@@ -13,19 +13,20 @@ def install_whatsapp(app_module):
     app = app_module.app
     def ensure_schema():
         conn = db()
-        conn.executescript("""
+        pk = "SERIAL PRIMARY KEY" if IS_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+        conn.executescript(f"""
         CREATE TABLE IF NOT EXISTS whatsapp_optins (
           student_id INTEGER PRIMARY KEY REFERENCES students(id),
           consent INTEGER NOT NULL DEFAULT 0,
           recorded_by TEXT, recorded_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_campaigns (
-          id INTEGER PRIMARY KEY, sender TEXT NOT NULL, scope TEXT NOT NULL,
+          id {pk}, sender TEXT NOT NULL, scope TEXT NOT NULL,
           template_name TEXT NOT NULL, language TEXT NOT NULL,
           created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS whatsapp_deliveries (
-          id INTEGER PRIMARY KEY, campaign_id INTEGER REFERENCES whatsapp_campaigns(id),
+          id {pk}, campaign_id INTEGER REFERENCES whatsapp_campaigns(id),
           student_id INTEGER REFERENCES students(id), phone TEXT,
           message_id TEXT, status TEXT NOT NULL, error TEXT,
           updated_at TEXT DEFAULT CURRENT_TIMESTAMP
