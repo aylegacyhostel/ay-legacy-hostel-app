@@ -69,8 +69,7 @@ def install_whatsapp(app_module):
             WHERE s.status='Active' ORDER BY s.last_name,s.first_name""").fetchall()
         history = conn.execute("""SELECT id,sender,scope,template_name,created_at FROM whatsapp_campaigns
             ORDER BY id DESC LIMIT 30""").fetchall()
-        conn.close()
-        return render_template('whatsapp_center.html',students=students,history=history,csrf=csrf(),
+        deliveries = conn.execute('''SELECT d.id,d.campaign_id,d.phone,d.status,d.error,d.updated_at,\n            s.first_name,s.last_name FROM whatsapp_deliveries d\n            LEFT JOIN students s ON s.id=d.student_id ORDER BY d.id DESC LIMIT 100''').fetchall()\n        conn.close()\n        return render_template('whatsapp_center.html',students=students,history=history,deliveries=deliveries,csrf=csrf(),
             ready=bool(os.getenv('WA_ACCESS_TOKEN') and os.getenv('WA_PHONE_NUMBER_ID') and os.getenv('WA_GRAPH_VERSION')),
             is_admin=session.get('role')=='admin')
 
@@ -118,35 +117,29 @@ def install_whatsapp(app_module):
         if not targets or len(targets)>250:
             flash('No opted-in active students with valid Ghana phone numbers, or over 250 recipients.','danger')
             return redirect(url_for('whatsapp_center'))
+        # Queue database records only. A separate worker performs API requests.
+        # Never perform a potentially long bulk send inside a Render web request.
         conn=db()
-        conn.execute('INSERT INTO whatsapp_campaigns(sender,scope,template_name,language) VALUES(?,?,?,?)',
-                     (session['user'],scope,template,language))
-        campaign=conn.execute('SELECT MAX(id) id FROM whatsapp_campaigns').fetchone()['id']
-        app_module.audit(conn,'whatsapp_campaign','campaign',campaign,'recipients='+str(len(targets)))
-        conn.commit();conn.close()
-        sent=0
-        version=os.environ['WA_GRAPH_VERSION']
-        if not re.fullmatch(r'v\d+\.\d+',version): abort(500)
-        url='https://graph.facebook.com/'+version+'/'+os.environ['WA_PHONE_NUMBER_ID']+'/messages'
-        for s,phone in targets:
-            payload={'messaging_product':'whatsapp','to':phone,'type':'template',
-                     'template':{'name':template,'language':{'code':language}}}
-            req=urllib.request.Request(url,data=json.dumps(payload).encode(),method='POST',headers={
-                'Authorization':'Bearer '+os.environ['WA_ACCESS_TOKEN'],'Content-Type':'application/json'})
-            status='failed'; mid=None; err=None
-            try:
-                with urllib.request.urlopen(req,timeout=12) as response:
-                    result=json.load(response)
-                mid=(result.get('messages') or [{}])[0].get('id')
-                status='accepted' if mid else 'failed'
-                if mid: sent+=1
-            except (urllib.error.HTTPError,urllib.error.URLError,TimeoutError,ValueError) as exc:
-                err=str(getattr(exc,'code','request failed'))[:100]
-            conn=db()
-            conn.execute('INSERT INTO whatsapp_deliveries(campaign_id,student_id,phone,message_id,status,error) VALUES(?,?,?,?,?,?)',
-                         (campaign,s['id'],phone,mid,status,err))
-            conn.commit();conn.close()
-        flash(f'Meta accepted {sent} of {len(targets)} message requests. Check delivery status in Meta; acceptance is not delivery.','success' if sent==len(targets) else 'warning')
+        try:
+            if IS_POSTGRES:
+                row=conn.execute('INSERT INTO whatsapp_campaigns(sender,scope,template_name,language) VALUES(?,?,?,?) RETURNING id',
+                    (session['user'],scope,template,language)).fetchone()
+                campaign=row['id']
+            else:
+                cursor=conn.execute('INSERT INTO whatsapp_campaigns(sender,scope,template_name,language) VALUES(?,?,?,?)',
+                    (session['user'],scope,template,language))
+                campaign=cursor.lastrowid
+            for student,phone in targets:
+                conn.execute('INSERT INTO whatsapp_deliveries(campaign_id,student_id,phone,status) VALUES(?,?,?,?)',
+                    (campaign,student['id'],phone,'queued'))
+            app_module.audit(conn,'whatsapp_campaign','campaign',campaign,'queued='+str(len(targets)))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        flash(f'Queued {len(targets)} messages. A configured background worker will send them.','success')
         return redirect(url_for('whatsapp_center'))
 
     @app.route('/whatsapp/webhook', methods=['GET','POST'])
