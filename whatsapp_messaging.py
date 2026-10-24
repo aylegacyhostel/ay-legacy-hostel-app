@@ -70,7 +70,7 @@ def install_whatsapp(app_module):
         history = conn.execute("""SELECT id,sender,scope,template_name,created_at FROM whatsapp_campaigns
             ORDER BY id DESC LIMIT 30""").fetchall()
         deliveries = conn.execute('''SELECT d.id,d.campaign_id,d.phone,d.status,d.error,d.updated_at,\n            s.first_name,s.last_name FROM whatsapp_deliveries d\n            LEFT JOIN students s ON s.id=d.student_id ORDER BY d.id DESC LIMIT 100''').fetchall()\n        conn.close()\n        return render_template('whatsapp_center.html',students=students,history=history,deliveries=deliveries,csrf=csrf(),
-            ready=bool(os.getenv('WA_ACCESS_TOKEN') and os.getenv('WA_PHONE_NUMBER_ID') and os.getenv('WA_GRAPH_VERSION')),
+            ready=bool(os.getenv('WA_WORKER_ENABLED')=='1' and os.getenv('WA_ACCESS_TOKEN') and os.getenv('WA_PHONE_NUMBER_ID') and os.getenv('WA_GRAPH_VERSION') and os.getenv('WA_APP_SECRET') and os.getenv('WA_VERIFY_TOKEN')),
             is_admin=session.get('role')=='admin')
 
     @app.route('/whatsapp/consent/<int:sid>', methods=['POST'])
@@ -96,7 +96,7 @@ def install_whatsapp(app_module):
     @app_module.permission_required('whatsapp.send')
     def whatsapp_send():
         verify_csrf()
-        if not (os.getenv('WA_ACCESS_TOKEN') and os.getenv('WA_PHONE_NUMBER_ID') and os.getenv('WA_GRAPH_VERSION')):
+        if not (os.getenv('WA_WORKER_ENABLED')=='1' and all(os.getenv(k) for k in ('WA_ACCESS_TOKEN','WA_PHONE_NUMBER_ID','WA_GRAPH_VERSION','WA_APP_SECRET','WA_VERIFY_TOKEN'))):
             flash('Meta Cloud API is not configured. No messages sent.','danger')
             return redirect(url_for('whatsapp_center'))
         scope=request.form.get('scope')
