@@ -491,6 +491,20 @@ def arrears_xlsx():
     bio=io.BytesIO(); wb.save(bio); bio.seek(0); return send_file(bio,as_attachment=True,download_name='AY_Legacy_Hostel_Arrears.xlsx',mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
+# Public legal notices required for Meta business application review.
+# These routes intentionally do not require a staff or student login.
+@app.route('/privacy-policy')
+def privacy_policy():
+    return render_template('legal_privacy_policy.html')
+
+@app.route('/terms')
+def terms_of_service():
+    return render_template('legal_terms.html')
+
+@app.route('/data-deletion')
+def data_deletion():
+    return render_template('legal_data_deletion.html')
+
 init_db()
 
 from whatsapp_messaging import install_whatsapp
