@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block content %}
 <h1>WhatsApp Messaging Center</h1>
 <p>Only Admin and staff explicitly granted <strong>WhatsApp Send</strong> can access this page. Messages use the official Meta Cloud API.</p>
-{% if not ready %}<div class="flash danger"><strong>Not connected:</strong> Set WA_ACCESS_TOKEN, WA_PHONE_NUMBER_ID and WA_GRAPH_VERSION in Render. Sending is disabled until configured.</div>{% endif %}
+{% if not ready %}<div class="flash danger"><strong>Not connected:</strong> Configure Meta credentials and a dedicated worker, then explicitly set WA_WORKER_ENABLED=1 on the web service. Sending is disabled until configured.</div>{% endif %}
 <h2>Send approved template</h2>
 <p>Business-initiated messages must use a template approved in WhatsApp Manager. This form supports templates without variables.</p>
 <form method="post" action="{{ url_for('whatsapp_send') }}">
@@ -18,6 +18,10 @@
 <table><thead><tr><th>Name</th><th>Room</th><th>Phone</th><th>WhatsApp consent</th>{% if is_admin %}<th>Admin action</th>{% endif %}</tr></thead><tbody>
 {% for s in students %}<tr><td>{{ s.first_name }} {{ s.last_name }}</td><td>{{ s.room_number or '-' }}</td><td>{{ s.phone or '-' }}</td><td>{{ 'Yes' if s.consent else 'No' }}</td>
 {% if is_admin %}<td><form method="post" action="{{ url_for('whatsapp_consent',sid=s.id) }}"><input type="hidden" name="_csrf" value="{{ csrf }}"><input type="hidden" name="consent" value="{{ 0 if s.consent else 1 }}"><button type="submit">{{ 'Revoke' if s.consent else 'Record opt-in' }}</button></form></td>{% endif %}</tr>{% endfor %}
+</tbody></table>
+<h2>Recent delivery statuses</h2>
+<table><thead><tr><th>Campaign</th><th>Student</th><th>Phone</th><th>Status</th><th>Error</th><th>Updated</th></tr></thead><tbody>
+{% for d in deliveries %}<tr><td>{{ d.campaign_id }}</td><td>{{ (d.first_name or '') ~ ' ' ~ (d.last_name or '') }}</td><td>{{ d.phone }}</td><td>{{ d.status }}</td><td>{{ d.error or '-' }}</td><td>{{ d.updated_at }}</td></tr>{% endfor %}
 </tbody></table>
 <h2>Recent campaigns</h2>
 <table><thead><tr><th>ID</th><th>Sender</th><th>Recipients</th><th>Template</th><th>Created</th></tr></thead><tbody>
