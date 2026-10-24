@@ -17,7 +17,8 @@ Check eligibility for **WhatsApp Business App Coexistence** using an eligible Me
    - `WA_GRAPH_VERSION` — current supported Graph API version, e.g. `v25.0` if supported for your account.
    - `WA_VERIFY_TOKEN` — random webhook verification string.
    - `WA_APP_SECRET` — Meta App Secret used to verify webhook signatures.
-7. Create a **separate Render background worker service** using the same repository, branch/deployment, PostgreSQL DATABASE_URL, and WA_* secrets. Set its start command to `python whatsapp_worker.py`. Do not run multiple SQLite workers. Ensure both services use the same database. Once the worker is running, set `WA_WORKER_ENABLED=1` on the **web service**; leave it unset until then.\n8. Configure Meta webhook callback URL `https://YOUR-RENDER-HOST/whatsapp/webhook`, verify using `WA_VERIFY_TOKEN`, subscribe to message status events.
+7. Create a **separate Render background worker service** using the same repository, branch/deployment, PostgreSQL DATABASE_URL, and WA_* secrets. Set its start command to `python whatsapp_worker.py`. Do not run multiple SQLite workers. Ensure both services use the same database. Once the worker is running, set `WA_WORKER_ENABLED=1` on the **web service**; leave it unset until then.
+8. Configure Meta webhook callback URL `https://YOUR-RENDER-HOST/whatsapp/webhook`, verify using `WA_VERIFY_TOKEN`, subscribe to message status events.
 9. Test one opted-in student and verify accepted, delivered and failed outcomes before bulk use.
 
 **Never paste access tokens, app secrets, or verification codes into GitHub, screenshots, or this chat.**
@@ -32,8 +33,12 @@ The Admin must record an explicit WhatsApp opt-in for each active student. Stude
 Open **WhatsApp** in the app. Select all active opted-in students or one student; enter the exact Meta-approved no-variable template name and language. Type SEND to confirm. One click queues a delivery for each eligible student (up to 250); the separately deployed worker sends them. Without the worker and WA_WORKER_ENABLED=1, sending stays disabled. Status "accepted" is not proof of delivery; the webhook updates statuses.
 
 ## Production limitations and pre-launch checks
-- This version stores queued deliveries in the database and uses a separate worker. PostgreSQL workers use row locking; configure a single worker initially. Delivery rows left in 'processing' after a worker crash require manual investigation; do not automatically retry unknown outcomes, which might duplicate messages.\n- Worker deployment and queue operations have not been tested on Render. Confirm the worker service is actually running before enabling sends.\n- Meta webhook notifications must be tested for correct signature verification and delivery updates.
+- This version stores queued deliveries in the database and uses a separate worker. PostgreSQL workers use row locking; configure a single worker initially. Delivery rows left in 'processing' after a worker crash require manual investigation; do not automatically retry unknown outcomes, which might duplicate messages.
+- Worker deployment and queue operations have not been tested on Render. Confirm the worker service is actually running before enabling sends.
+- Meta webhook notifications must be tested for correct signature verification and delivery updates.
 - The current form supports only **approved templates without variables**; personalized messages need template parameter support.
 - Confirm PostgreSQL compatibility and review deployment logs before enabling any sends.
 - Audit and test the app's permissions, consent flows, CSRF, Meta signature verification, status webhook, and rate limits.
-- Disable bulk sends until Meta onboarding, billing, testing and operational review are complete.\n- Existing PR #5 legal page links must remain intact when merging changes to templates/base.html.\n- Do not enable WA_WORKER_ENABLED before successful onboarding and consent testing.
+- Disable bulk sends until Meta onboarding, billing, testing and operational review are complete.
+- Existing PR #5 legal page links must remain intact when merging changes to templates/base.html.
+- Do not enable WA_WORKER_ENABLED before successful onboarding and consent testing.
