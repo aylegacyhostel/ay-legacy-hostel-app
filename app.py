@@ -251,7 +251,11 @@ def students():
     sql="""SELECT s.*,COALESCE(SUM(p.amount_due),0) total_due,COALESCE(SUM(p.amount_paid),0) total_paid,COALESCE(SUM(p.amount_due-p.amount_paid),0) balance FROM students s LEFT JOIN payments p ON p.student_id=s.id WHERE 1=1"""; params=[]
     if q:
         like=f'%{q}%'; sql+=" AND (s.first_name LIKE ? OR s.last_name LIKE ? OR s.student_id LIKE ? OR s.phone LIKE ? OR s.room_number LIKE ? OR s.program LIKE ?)"; params += [like]*6
-    if year: sql+=' AND s.year_level=?'; params.append(year)
+    if year:
+        if year in ('100','200','300','400'):
+            sql+=' AND s.year_level IN (?,?)'; params.extend([year,str(int(year)//100)])
+        else:
+            sql+=' AND s.year_level=?'; params.append(year)
     if status: sql+=' AND s.status=?'; params.append(status)
     if room: sql+=' AND s.room_number=?'; params.append(room)
     if program: sql+=' AND s.program=?'; params.append(program)
