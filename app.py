@@ -247,7 +247,7 @@ def dashboard():
 @login_required
 @permission_required('students.view')
 def students():
-    q=request.args.get('q','').strip(); year=request.args.get('year','').strip(); status=request.args.get('status','').strip(); room=request.args.get('room','').strip(); program=request.args.get('program','').strip()
+    q=request.args.get('q','').strip(); year=request.args.get('year','').strip(); status=request.args.get('status','').strip(); room=request.args.get('room','').strip(); program=request.args.get('program','').strip(); floor=request.args.get('floor','').strip(); payment_status=request.args.get('payment_status','').strip()
     sql="""SELECT s.*,COALESCE(SUM(p.amount_due),0) total_due,COALESCE(SUM(p.amount_paid),0) total_paid,COALESCE(SUM(p.amount_due-p.amount_paid),0) balance FROM students s LEFT JOIN payments p ON p.student_id=s.id WHERE 1=1"""; params=[]
     if q:
         like=f'%{q}%'; sql+=" AND (s.first_name LIKE ? OR s.last_name LIKE ? OR s.student_id LIKE ? OR s.phone LIKE ? OR s.room_number LIKE ? OR s.program LIKE ?)"; params += [like]*6
@@ -255,9 +255,14 @@ def students():
     if status: sql+=' AND s.status=?'; params.append(status)
     if room: sql+=' AND s.room_number=?'; params.append(room)
     if program: sql+=' AND s.program=?'; params.append(program)
-    sql+=' GROUP BY s.id ORDER BY s.last_name,s.first_name'
-    conn=db(); rows=conn.execute(sql,params).fetchall(); rooms=conn.execute('SELECT room_number FROM rooms ORDER BY room_number').fetchall(); programs=conn.execute("SELECT DISTINCT program FROM students WHERE program IS NOT NULL AND TRIM(program)<>'' ORDER BY program").fetchall(); conn.close()
-    return render_template('students.html',students=rows,q=q,year=year,status=status,room=room,program=program,rooms=rooms,programs=programs)
+    if floor: sql+=' AND s.room_number IN (SELECT room_number FROM rooms WHERE floor=?)'; params.append(floor)
+    sql+=' GROUP BY s.id'
+    if payment_status=='Paid': sql+=' HAVING COALESCE(SUM(p.amount_due-p.amount_paid),0)<=0 AND COALESCE(SUM(p.amount_due),0)>0'
+    elif payment_status=='Outstanding': sql+=' HAVING COALESCE(SUM(p.amount_due-p.amount_paid),0)>0'
+    elif payment_status=='No Payments': sql+=' HAVING COUNT(p.id)=0'
+    sql+=' ORDER BY s.last_name,s.first_name'
+    conn=db(); rows=conn.execute(sql,params).fetchall(); rooms=conn.execute('SELECT room_number FROM rooms ORDER BY room_number').fetchall(); floors=conn.execute("SELECT DISTINCT floor FROM rooms WHERE floor IS NOT NULL AND TRIM(floor)<>'' ORDER BY floor").fetchall(); programs=conn.execute("SELECT DISTINCT program FROM students WHERE program IS NOT NULL AND TRIM(program)<>'' ORDER BY program").fetchall(); conn.close()
+    return render_template('students.html',students=rows,q=q,year=year,status=status,room=room,program=program,room=room,floor=floor,payment_status=payment_status,rooms=rooms,floors=floors,programs=programs)
 
 def save_student_form(conn,sid=None):
     fields=['student_id','first_name','last_name','gender','phone','email','school','program','year_level','date_of_birth','hometown','room_number','bed_space','check_in_date','expected_check_out','status','parent_name','parent_phone','parent_email','parent_relationship','emergency_name','emergency_phone','emergency_relationship','medical_notes','id_type','id_number','notes']
@@ -363,7 +368,22 @@ def arrears():
 @login_required
 @permission_required('rooms.view')
 def rooms():
-    conn=db(); rows=conn.execute('''SELECT r.*,COUNT(s.id) occupied FROM rooms r LEFT JOIN students s ON s.room_number=r.room_number AND s.status='Active' GROUP BY r.id ORDER BY r.room_number''').fetchall(); conn.close(); return render_template('rooms.html',rooms=rows)
+    floor=request.args.get('floor','').strip(); room=request.args.get('room','').strip(); occupancy=request.args.get('occupancy','').strip()
+    conn=db()
+    sql="""SELECT r.*,COUNT(s.id) occupied FROM rooms r LEFT JOIN students s ON s.room_number=r.room_number AND s.status='Active' WHERE 1=1"""
+    params=[]
+    if floor: sql+=' AND r.floor=?'; params.append(floor)
+    if room: sql+=' AND r.room_number=?'; params.append(room)
+    sql+=' GROUP BY r.id'
+    if occupancy=='Available': sql+=' HAVING COUNT(s.id)=0'
+    elif occupancy=='Partial': sql+=' HAVING COUNT(s.id)>0 AND COUNT(s.id)<MAX(r.capacity)'
+    elif occupancy=='Full': sql+=' HAVING COUNT(s.id)>=MAX(r.capacity)'
+    sql+=' ORDER BY r.room_number'
+    rows=conn.execute(sql,params).fetchall()
+    floors=conn.execute("SELECT DISTINCT floor FROM rooms WHERE floor IS NOT NULL AND TRIM(floor)<>'' ORDER BY floor").fetchall()
+    room_options=conn.execute('SELECT room_number FROM rooms ORDER BY room_number').fetchall()
+    conn.close()
+    return render_template('rooms.html',rooms=rows,floor=floor,room=room,occupancy=occupancy,floors=floors,room_options=room_options)
 
 @app.route('/rooms/new',methods=['GET','POST'])
 @login_required
