@@ -262,7 +262,7 @@ def students():
     elif payment_status=='No Payments': sql+=' HAVING COUNT(p.id)=0'
     sql+=' ORDER BY s.last_name,s.first_name'
     conn=db(); rows=conn.execute(sql,params).fetchall(); rooms=conn.execute('SELECT room_number FROM rooms ORDER BY room_number').fetchall(); floors=conn.execute("SELECT DISTINCT floor FROM rooms WHERE floor IS NOT NULL AND TRIM(floor)<>'' ORDER BY floor").fetchall(); programs=conn.execute("SELECT DISTINCT program FROM students WHERE program IS NOT NULL AND TRIM(program)<>'' ORDER BY program").fetchall(); conn.close()
-    return render_template('students.html',students=rows,q=q,year=year,status=status,room=room,program=program,room=room,floor=floor,payment_status=payment_status,rooms=rooms,floors=floors,programs=programs)
+    return render_template('students.html',students=rows,q=q,year=year,status=status,room=room,program=program,floor=floor,payment_status=payment_status,rooms=rooms,floors=floors,programs=programs)
 
 def save_student_form(conn,sid=None):
     fields=['student_id','first_name','last_name','gender','phone','email','school','program','year_level','date_of_birth','hometown','room_number','bed_space','check_in_date','expected_check_out','status','parent_name','parent_phone','parent_email','parent_relationship','emergency_name','emergency_phone','emergency_relationship','medical_notes','id_type','id_number','notes']
